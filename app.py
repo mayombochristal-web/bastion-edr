@@ -23,17 +23,30 @@ st.subheader("Cyber-Résilience par Membrane Adaptive")
 @st.cache_resource
 def get_engine():
 
-    db_url = f"""
-    postgresql+psycopg2://{st.secrets["DB_USER"]}:{st.secrets["DB_PASSWORD"]}
-    @{st.secrets["DB_HOST"]}:{st.secrets["DB_PORT"]}/{st.secrets["DB_NAME"]}
-    """
+    db_user = st.secrets["DB_USER"]
+    db_password = st.secrets["DB_PASSWORD"]
+    db_host = st.secrets["DB_HOST"]
+    db_port = st.secrets["DB_PORT"]
+    db_name = st.secrets["DB_NAME"]
 
-    engine = create_engine(db_url, connect_args={"sslmode": "require"})
+    db_url = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+    engine = create_engine(
+        db_url,
+        connect_args={"sslmode": "require"},
+        pool_pre_ping=True
+    )
 
     return engine
 
+try:
+    df = pd.read_sql("SELECT NOW()", engine)
+    st.success("Connexion Supabase OK")
+    st.write(df)
 
-engine = get_engine()
+except Exception as e:
+    st.error("Erreur connexion base")
+    st.write(e)
 
 # =====================================================
 # LOAD DATA
