@@ -1,5 +1,7 @@
-streamlit
-pandas
-plotly
-sqlalchemy
-psycopg2-binary
+streamlit==1.31.0
+pandas==2.2.1
+numpy==1.26.4
+plotly==5.20.0
+supabase==2.3.0
+streamlit-option-menu==0.3.11
+python-dotenv==1.0.1
