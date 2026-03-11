@@ -39,7 +39,8 @@ if st.sidebar.button("Forcer le Battement de Cœur (Heartbeat)"):
 
 # 3. Récupération des données du Registre (k-factor)
 def get_registry_data():
-    res = supabase.table("registry").schema("ttu_core").select("*").execute()
+    # Correction : .schema() doit être appelé AVANT .table()
+    res = supabase.schema("ttu_core").table("registry").select("*").execute()
     return pd.DataFrame(res.data)
 
 df_reg = get_registry_data()
