@@ -22,14 +22,22 @@ load_dotenv()
 # =====================================================
 
 def get_connection():
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT"),
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD")
-    )
 
+    return psycopg2.connect(
+        host=st.secrets["db.zamiqjzgkriqtusvmpza.supabase.co"],
+        port=st.secrets["5432"], 
+        dbname=st.secrets["postgres"], 
+        user=st.secrets["postgres"], 
+        password=st.secrets["Broozy040200"], 
+        sslmode="require"
+    )
+try:
+    conn = get_connection()
+    st.success("Connexion Supabase OK")
+    conn.close()
+except Exception as e:
+    st.error("Erreur connexion base")
+    st.write(e)
 
 # =====================================================
 # CHARGEMENT DONNEES
