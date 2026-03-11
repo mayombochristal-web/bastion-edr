@@ -1,6 +1,6 @@
 zlib1g-dev
 libjpeg-dev
 libpng-dev
-libfreetype6-dev
-liblcms2-dev
 libtiff-dev
+liblcms2-dev
+build-essential
