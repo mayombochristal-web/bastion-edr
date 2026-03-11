@@ -1,9 +1,7 @@
 import streamlit as st
-import psycopg2
 import pandas as pd
 import plotly.express as px
-from dotenv import load_dotenv
-import os
+from sqlalchemy import create_engine
 
 # =====================================================
 # CONFIG
@@ -15,187 +13,214 @@ st.set_page_config(
     page_icon="🛡️"
 )
 
-load_dotenv()
+st.title("🛡️ TTU BASTION EDR")
+st.subheader("Cyber-Résilience par Membrane Adaptive")
 
 # =====================================================
-# CONNEXION DATABASE
+# DATABASE ENGINE
 # =====================================================
 
-def get_connection():
+@st.cache_resource
+def get_engine():
 
-    return psycopg2.connect(
-        host=st.secrets["DB_HOST"],
-        port=st.secrets["DB_PORT"],
-        dbname=st.secrets["DB_NAME"],
-        user=st.secrets["DB_USER"],
-        password=st.secrets["DB_PASSWORD"],
-        sslmode="require"
-    )
-    
-try:
-    conn = get_connection()
-    st.success("Connexion Supabase OK")
-    conn.close()
-except Exception as e:
-    st.error("Erreur connexion base")
-    st.write(e)
-
-# =====================================================
-# CHARGEMENT DONNEES
-# =====================================================
-
-def load_registry():
-
-    conn = get_connection()
-
-    query = """
-    SELECT
-        app_name,
-        k_factor,
-        adaptive_threshold,
-        last_heartbeat,
-        is_active
-    FROM ttu_core.registry
+    db_url = f"""
+    postgresql+psycopg2://{st.secrets["DB_USER"]}:{st.secrets["DB_PASSWORD"]}
+    @{st.secrets["DB_HOST"]}:{st.secrets["DB_PORT"]}/{st.secrets["DB_NAME"]}
     """
 
-    df = pd.read_sql(query, conn)
-    conn.close()
+    engine = create_engine(db_url, connect_args={"sslmode": "require"})
 
-    return df
-
-
-def load_vault():
-
-    conn = get_connection()
-
-    query = """
-    SELECT
-        app_id,
-        target_table,
-        priority,
-        ingested_at,
-        processed
-    FROM ttu_core.dissipation_vault
-    ORDER BY ingested_at DESC
-    LIMIT 500
-    """
-
-    df = pd.read_sql(query, conn)
-    conn.close()
-
-    return df
+    return engine
 
 
+engine = get_engine()
+
+# =====================================================
+# LOAD DATA
+# =====================================================
+
+@st.cache_data(ttl=60)
 def load_users():
 
-    conn = get_connection()
-
     query = """
-    SELECT
-        email,
-        company_name,
-        created_at
+    SELECT email, company_name, created_at
     FROM public.users
     ORDER BY created_at DESC
     """
 
-    df = pd.read_sql(query, conn)
-    conn.close()
+    return pd.read_sql(query, engine)
 
-    return df
+
+@st.cache_data(ttl=60)
+def load_endpoints():
+
+    query = """
+    SELECT id, ip_address, os, protection_status, last_sync
+    FROM public.endpoints
+    """
+
+    return pd.read_sql(query, engine)
+
+
+@st.cache_data(ttl=60)
+def load_audit_logs():
+
+    query = """
+    SELECT timestamp, ip, kmass_score, ml_anomaly_score, reputation_score
+    FROM public.audit_logs_global
+    ORDER BY timestamp DESC
+    LIMIT 500
+    """
+
+    return pd.read_sql(query, engine)
+
+
+@st.cache_data(ttl=60)
+def load_quarantine():
+
+    query = """
+    SELECT payload_hash, reason, quarantined_at
+    FROM public.quarantine_vault
+    ORDER BY quarantined_at DESC
+    LIMIT 500
+    """
+
+    return pd.read_sql(query, engine)
+
+
+@st.cache_data(ttl=60)
+def load_blacklist():
+
+    query = """
+    SELECT ip_address, ban_depth, reason, expires_at
+    FROM public.blacklisted_entities
+    """
+
+    return pd.read_sql(query, engine)
 
 
 # =====================================================
-# UI
+# SIDEBAR
 # =====================================================
-
-st.title("🛡️ TTU BASTION EDR")
-st.subheader("Cyber-Résilience par Membrane Adaptive")
 
 menu = st.sidebar.selectbox(
     "Navigation",
     [
-        "Dashboard",
-        "Flux Vault",
-        "Applications",
-        "Utilisateurs",
-        "Statistiques"
+        "SOC Dashboard",
+        "Threat Timeline",
+        "Quarantine Vault",
+        "Blacklisted Entities",
+        "Endpoints",
+        "Utilisateurs"
     ]
 )
 
 # =====================================================
-# DASHBOARD
+# SOC DASHBOARD
 # =====================================================
 
-if menu == "Dashboard":
+if menu == "SOC Dashboard":
 
-    st.header("📊 État global du système")
+    st.header("📊 Security Operations Center")
 
-    registry = load_registry()
+    endpoints = load_endpoints()
+    logs = load_audit_logs()
+    quarantine = load_quarantine()
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric(
-        "Applications actives",
-        registry.shape[0]
-    )
+    col1.metric("Endpoints actifs", len(endpoints))
+    col2.metric("Logs analysés", len(logs))
+    col3.metric("Objets en quarantaine", len(quarantine))
 
-    col2.metric(
-        "k moyen",
-        round(registry["k_factor"].mean(), 2)
-    )
+    if not logs.empty:
 
-    col3.metric(
-        "Seuil adaptatif moyen",
-        round(registry["adaptive_threshold"].mean(), 2)
-    )
+        fig = px.scatter(
+            logs,
+            x="kmass_score",
+            y="ml_anomaly_score",
+            color="reputation_score",
+            title="Carte de menace IA"
+        )
 
-    fig = px.bar(
-        registry,
-        x="app_name",
-        y="k_factor",
-        title="Courbure k par application"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # =====================================================
-# VAULT
+# THREAT TIMELINE
 # =====================================================
 
-elif menu == "Flux Vault":
+elif menu == "Threat Timeline":
 
-    st.header("📦 Dissipation Vault")
+    st.header("📈 Timeline des menaces")
 
-    vault = load_vault()
+    logs = load_audit_logs()
 
-    st.dataframe(vault, use_container_width=True)
+    if not logs.empty:
 
-    fig = px.histogram(
-        vault,
-        x="priority",
-        title="Distribution des priorités"
-    )
+        fig = px.line(
+            logs,
+            x="timestamp",
+            y="ml_anomaly_score",
+            title="Anomalies détectées"
+        )
 
-    st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-
-# =====================================================
-# APPLICATIONS
-# =====================================================
-
-elif menu == "Applications":
-
-    st.header("⚙️ Registre des applications")
-
-    registry = load_registry()
-
-    st.dataframe(registry, use_container_width=True)
+    st.dataframe(logs, use_container_width=True)
 
 
 # =====================================================
-# UTILISATEURS
+# QUARANTINE
+# =====================================================
+
+elif menu == "Quarantine Vault":
+
+    st.header("🧪 Vault de quarantaine")
+
+    quarantine = load_quarantine()
+
+    st.dataframe(quarantine, use_container_width=True)
+
+
+# =====================================================
+# BLACKLIST
+# =====================================================
+
+elif menu == "Blacklisted Entities":
+
+    st.header("🚫 Entités bannies")
+
+    blacklist = load_blacklist()
+
+    st.dataframe(blacklist, use_container_width=True)
+
+
+# =====================================================
+# ENDPOINTS
+# =====================================================
+
+elif menu == "Endpoints":
+
+    st.header("💻 Terminaux surveillés")
+
+    endpoints = load_endpoints()
+
+    st.dataframe(endpoints, use_container_width=True)
+
+    if not endpoints.empty:
+
+        fig = px.histogram(
+            endpoints,
+            x="protection_status",
+            title="Statut de protection"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# =====================================================
+# USERS
 # =====================================================
 
 elif menu == "Utilisateurs":
@@ -205,22 +230,3 @@ elif menu == "Utilisateurs":
     users = load_users()
 
     st.dataframe(users, use_container_width=True)
-
-
-# =====================================================
-# STATISTIQUES
-# =====================================================
-
-elif menu == "Statistiques":
-
-    st.header("📈 Analyse système")
-
-    vault = load_vault()
-
-    fig = px.line(
-        vault,
-        x="ingested_at",
-        title="Flux de dissipation"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
