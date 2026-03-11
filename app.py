@@ -24,13 +24,14 @@ load_dotenv()
 def get_connection():
 
     return psycopg2.connect(
-        host=st.secrets["db.zamiqjzgkriqtusvmpza.supabase.co"],
-        port=st.secrets["5432"], 
-        dbname=st.secrets["postgres"], 
-        user=st.secrets["postgres"], 
-        password=st.secrets["Broozy040200"], 
+        host=st.secrets["DB_HOST"],
+        port=st.secrets["DB_PORT"],
+        dbname=st.secrets["DB_NAME"],
+        user=st.secrets["DB_USER"],
+        password=st.secrets["DB_PASSWORD"],
         sslmode="require"
     )
+    
 try:
     conn = get_connection()
     st.success("Connexion Supabase OK")
