@@ -1,94 +1,217 @@
 import streamlit as st
+import psycopg2
 import pandas as pd
 import plotly.express as px
-from supabase import create_client, Client
+from dotenv import load_dotenv
 import os
 
-# Configuration de la page
+# =====================================================
+# CONFIG
+# =====================================================
+
 st.set_page_config(
-    page_title="TTU BASTION EDR - Cockpit de Dissipation",
-    page_icon="🛡️",
-    layout="wide"
+    page_title="TTU BASTION EDR",
+    layout="wide",
+    page_icon="🛡️"
 )
 
-# 1. Connexion Supabase (Utilise les Secrets de Streamlit)
-@st.cache_resource
-def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+load_dotenv()
 
-try:
-    supabase: Client = init_connection()
-except Exception as e:
-    st.error("Erreur de connexion à Supabase. Vérifiez vos Secrets Streamlit.")
-    st.stop()
+# =====================================================
+# CONNEXION DATABASE
+# =====================================================
 
-# 2. Interface de Monitoring
-st.title("🛡️ TTU BASTION EDR – Console de Résilience")
-st.markdown("---")
+def get_connection():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=os.getenv("DB_PORT"),
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD")
+    )
 
-# Sidebar - État du Noyau
-st.sidebar.header("Statut du Noyau TTU-MC³")
-if st.sidebar.button("Forcer le Battement de Cœur (Heartbeat)"):
-    try:
-        supabase.rpc('heartbeat_modulation').execute()
-        st.sidebar.success("Modulation effectuée")
-    except Exception as e:
-        st.sidebar.error(f"Erreur RPC : {e}")
 
-# 3. Récupération des données du Registre (k-factor)
-def get_registry_data():
-    # Correction : .schema() doit être appelé AVANT .table()
-    res = supabase.schema("ttu_core").table("registry").select("*").execute()
-    return pd.DataFrame(res.data)
+# =====================================================
+# CHARGEMENT DONNEES
+# =====================================================
 
-df_reg = get_registry_data()
+def load_registry():
 
-if not df_reg.empty:
-    # Métriques Clés
+    conn = get_connection()
+
+    query = """
+    SELECT
+        app_name,
+        k_factor,
+        adaptive_threshold,
+        last_heartbeat,
+        is_active
+    FROM ttu_core.registry
+    """
+
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    return df
+
+
+def load_vault():
+
+    conn = get_connection()
+
+    query = """
+    SELECT
+        app_id,
+        target_table,
+        priority,
+        ingested_at,
+        processed
+    FROM ttu_core.dissipation_vault
+    ORDER BY ingested_at DESC
+    LIMIT 500
+    """
+
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    return df
+
+
+def load_users():
+
+    conn = get_connection()
+
+    query = """
+    SELECT
+        email,
+        company_name,
+        created_at
+    FROM public.users
+    ORDER BY created_at DESC
+    """
+
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    return df
+
+
+# =====================================================
+# UI
+# =====================================================
+
+st.title("🛡️ TTU BASTION EDR")
+st.subheader("Cyber-Résilience par Membrane Adaptive")
+
+menu = st.sidebar.selectbox(
+    "Navigation",
+    [
+        "Dashboard",
+        "Flux Vault",
+        "Applications",
+        "Utilisateurs",
+        "Statistiques"
+    ]
+)
+
+# =====================================================
+# DASHBOARD
+# =====================================================
+
+if menu == "Dashboard":
+
+    st.header("📊 État global du système")
+
+    registry = load_registry()
+
     col1, col2, col3 = st.columns(3)
-    avg_k = df_reg['k_factor'].mean()
-    total_apps = len(df_reg)
-    
-    col1.metric("Nombre d'Applications", total_apps)
-    col2.metric("Facteur de Courbure Moyen (k)", f"{avg_k:.4f}")
-    col3.metric("État Global", "STABLE" if avg_k < 2.0 else "CONTRACTION")
 
-    # Graphique de la Courbure k par Application
-    st.subheader("Analyse de la Membrane Adaptive (Courbure k)")
-    fig = px.bar(df_reg, x='app_name', y='k_factor', 
-                 color='k_factor', title="Pression thermodynamique par terminal",
-                 color_continuous_scale='Viridis')
+    col1.metric(
+        "Applications actives",
+        registry.shape[0]
+    )
+
+    col2.metric(
+        "k moyen",
+        round(registry["k_factor"].mean(), 2)
+    )
+
+    col3.metric(
+        "Seuil adaptatif moyen",
+        round(registry["adaptive_threshold"].mean(), 2)
+    )
+
+    fig = px.bar(
+        registry,
+        x="app_name",
+        y="k_factor",
+        title="Courbure k par application"
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
-    # Tableau du Registre
-    st.subheader("Détails du Registre de Cohérence")
-    st.dataframe(df_reg[['app_name', 'app_id', 'k_factor', 'adaptive_threshold', 'last_heartbeat']], 
-                 use_container_width=True)
 
-# 4. Simulation d'envoi de Log (Test de liaison)
-st.markdown("---")
-st.subheader("🚀 Test d'Injection dans le Vault")
-with st.expander("Envoyer un événement de sécurité manuel"):
-    with st.form("manual_injection"):
-        selected_app = st.selectbox("Application", df_reg['app_name'].tolist())
-        target_app_id = df_reg[df_reg['app_name'] == selected_app]['app_id'].values[0]
-        event_msg = st.text_input("Message d'alerte", "Suspicious process detected")
-        priority = st.slider("Priorité", 1, 5, 2)
-        submit = st.form_submit_button("Dissiper vers le Vault")
+# =====================================================
+# VAULT
+# =====================================================
 
-        if submit:
-            payload = {
-                "app_id": target_app_id,
-                "target_table": "audit_logs_global",
-                "payload": {"event": event_msg, "source": "Cockpit_Manual"},
-                "priority": priority
-            }
-            res_insert = supabase.table("dissipation_vault").schema("ttu_core").insert(payload).execute()
-            if res_insert.data:
-                st.success(f"Événement injecté. Le facteur k de {selected_app} va s'ajuster au prochain battement.")
+elif menu == "Flux Vault":
 
-# Pied de page
-st.markdown("---")
-st.caption("TTU BASTION EDR v2.0 - Souveraineté Numérique - Développeur : GEB")
+    st.header("📦 Dissipation Vault")
+
+    vault = load_vault()
+
+    st.dataframe(vault, use_container_width=True)
+
+    fig = px.histogram(
+        vault,
+        x="priority",
+        title="Distribution des priorités"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# =====================================================
+# APPLICATIONS
+# =====================================================
+
+elif menu == "Applications":
+
+    st.header("⚙️ Registre des applications")
+
+    registry = load_registry()
+
+    st.dataframe(registry, use_container_width=True)
+
+
+# =====================================================
+# UTILISATEURS
+# =====================================================
+
+elif menu == "Utilisateurs":
+
+    st.header("👤 Clients")
+
+    users = load_users()
+
+    st.dataframe(users, use_container_width=True)
+
+
+# =====================================================
+# STATISTIQUES
+# =====================================================
+
+elif menu == "Statistiques":
+
+    st.header("📈 Analyse système")
+
+    vault = load_vault()
+
+    fig = px.line(
+        vault,
+        x="ingested_at",
+        title="Flux de dissipation"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
