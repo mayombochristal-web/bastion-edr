@@ -57,7 +57,7 @@ def init_engine():
     dbname = st.secrets["DB_NAME"]
     user = st.secrets["DB_USER"]
     password = st.secrets["DB_PASSWORD"]
-    conn_str = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+    conn_str = f"postgresql+pg8000://{user}:{password}@{host}:{port}/{dbname}"
     return create_engine(conn_str, pool_pre_ping=True)
 
 engine = init_engine()
