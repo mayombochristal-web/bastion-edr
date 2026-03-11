@@ -1,7 +1,4 @@
 streamlit
-psycopg2-binary
+supabase
 pandas
 plotly
-requests
-python-dotenv
-resend
