@@ -3,4 +3,4 @@ pandas==2.2.1
 numpy==1.26.4
 plotly==5.18.0
 sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
+pg8000==1.30.5
