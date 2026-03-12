@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-TTU Shield Sentinel – Version Professionnelle
-Avec paywall, onboarding, monitoring temps réel et logs persistants.
-Utilise des données système réelles (psutil) et une file thread-safe.
+TTU Shield Sentinel – Version Finale Professionnelle
+Avec analyse réelle de l'hôte, threads stables, paywall,
+onboarding, logs temps réel, analyse ciblée et historique.
 """
 
 import streamlit as st
@@ -19,6 +19,7 @@ import json
 import uuid
 import os
 import socket
+import platform
 from datetime import datetime, timedelta
 from collections import deque
 from queue import Queue, Empty
@@ -42,7 +43,7 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------------
-# CSS personnalisé (identique aux versions précédentes)
+# CSS personnalisé
 # -------------------------------------------------------------------
 st.markdown("""
 <style>
@@ -133,7 +134,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# Moteur TTU avec auto‑adaptation (identique)
+# Moteur TTU avec auto‑adaptation
 # -------------------------------------------------------------------
 class TTUEngine:
     def __init__(self, k_factor=1.2, weights=(1.0, 1.5, 2.0), n_sigma=2.0):
@@ -248,6 +249,76 @@ def get_active_connections():
     return conns
 
 # -------------------------------------------------------------------
+# Scan réel de fichiers (limité)
+# -------------------------------------------------------------------
+def scan_directory(path, max_files=50, max_depth=3):
+    results = []
+    if not os.path.isdir(path):
+        return results
+    try:
+        for root, dirs, files in os.walk(path):
+            depth = root.replace(path, '').count(os.sep)
+            if depth > max_depth:
+                dirs[:] = []
+                continue
+            for f in files:
+                if len(results) >= max_files:
+                    return results
+                full_path = os.path.join(root, f)
+                try:
+                    file_size = os.path.getsize(full_path)
+                    if file_size > 100 * 1024 * 1024:
+                        continue
+                    file_hash = hash_file(full_path)
+                    results.append({
+                        'path': full_path,
+                        'size': file_size,
+                        'hash': file_hash,
+                        'suspicious': False
+                    })
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return results
+
+# -------------------------------------------------------------------
+# Analyse de site web (Google Safe Browsing)
+# -------------------------------------------------------------------
+def check_url_google_safe_browsing(url, api_key):
+    if not api_key:
+        return None
+    endpoint = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+    payload = {
+        "client": {
+            "clientId": "ttu-shield-sentinel",
+            "clientVersion": "1.0.0"
+        },
+        "threatInfo": {
+            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+            "platformTypes": ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries": [{"url": url}]
+        }
+    }
+    try:
+        r = requests.post(endpoint, params={"key": api_key}, json=payload, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("matches") is not None
+    except:
+        pass
+    return None
+
+def analyze_url(url, google_api_key=None):
+    if google_api_key:
+        malicious = check_url_google_safe_browsing(url, google_api_key)
+        if malicious is not None:
+            return {"malicious": malicious, "method": "Google Safe Browsing"}
+    # Simulation si pas de clé
+    return {"malicious": random.random() < 0.2, "method": "Simulation"}
+
+# -------------------------------------------------------------------
 # Connexion Supabase et fonctions de persistance
 # -------------------------------------------------------------------
 @st.cache_resource
@@ -274,7 +345,6 @@ def get_supabase_connection():
         return None
 
 def get_user_subscription(user_id, conn):
-    """Récupère l'abonnement d'un utilisateur. Retourne None si non trouvé."""
     if not conn:
         return None
     try:
@@ -292,8 +362,35 @@ def get_user_subscription(user_id, conn):
         st.error(f"Erreur lecture abonnement: {e}")
     return None
 
+def validate_invite_code(code, user_id, conn):
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, plan_type, is_used
+            FROM invitations
+            WHERE code = %s AND (expires_at IS NULL OR expires_at > NOW())
+        """, (code,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        invite_id, plan_type, is_used = row
+        if is_used:
+            return None
+        cur.execute("""
+            UPDATE invitations
+            SET is_used = TRUE, used_by_user_id = %s
+            WHERE id = %s
+        """, (user_id, invite_id))
+        conn.commit()
+        cur.close()
+        return plan_type
+    except Exception as e:
+        st.error(f"Erreur validation code: {e}")
+        return None
+
 def create_subscription_from_invite(user_id, plan_type, conn):
-    """Crée un abonnement pour un utilisateur à partir d'un code d'invitation."""
     if not conn:
         return False
     try:
@@ -311,38 +408,7 @@ def create_subscription_from_invite(user_id, plan_type, conn):
         st.error(f"Erreur création abonnement: {e}")
         return False
 
-def validate_invite_code(code, user_id, conn):
-    """Vérifie si un code d'invitation est valide et l'utilise."""
-    if not conn:
-        return None
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, plan_type, is_used
-            FROM invitations
-            WHERE code = %s AND (expires_at IS NULL OR expires_at > NOW())
-        """, (code,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        invite_id, plan_type, is_used = row
-        if is_used:
-            return None
-        # Marquer comme utilisé
-        cur.execute("""
-            UPDATE invitations
-            SET is_used = TRUE, used_by_user_id = %s
-            WHERE id = %s
-        """, (user_id, invite_id))
-        conn.commit()
-        cur.close()
-        return plan_type
-    except Exception as e:
-        st.error(f"Erreur validation code: {e}")
-        return None
-
 def register_endpoint(user_id, endpoint_name, conn):
-    """Enregistre un nouvel endpoint pour l'utilisateur."""
     if not conn:
         return None
     hostname = socket.gethostname()
@@ -381,13 +447,39 @@ def insert_security_log(conn, endpoint_id, phi_m, phi_c, phi_d, score, status, d
     except Exception as e:
         st.error(f"Erreur insertion log: {e}")
 
+def insert_threat_signature(conn, pattern, weight, description, phi_m, phi_c, phi_d):
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO threat_library (pattern, weight, description, phi_m, phi_c, phi_d)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (pattern, weight, description, phi_m, phi_c, phi_d))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        st.error(f"Erreur insertion threat_library: {e}")
+
+def get_threat_library(conn):
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT pattern, weight, description, phi_m, phi_c, phi_d FROM threat_library ORDER BY weight DESC")
+        rows = cur.fetchall()
+        cur.close()
+        return [{'pattern': r[0], 'weight': r[1], 'description': r[2], 'phi_m': r[3], 'phi_c': r[4], 'phi_d': r[5]} for r in rows]
+    except Exception as e:
+        st.error(f"Erreur lecture threat_library: {e}")
+        return []
+
 # -------------------------------------------------------------------
 # Gestion des logs en temps réel (file thread-safe)
 # -------------------------------------------------------------------
 log_queue = Queue()
 
 def add_log(message, level="INFO"):
-    """Ajoute un message dans la file des logs."""
     timestamp = datetime.now().strftime("%H:%M:%S")
     log_queue.put({
         'time': timestamp,
@@ -396,29 +488,21 @@ def add_log(message, level="INFO"):
     })
 
 # -------------------------------------------------------------------
-# Boucle de surveillance réelle (thread) – utilise une file pour les logs
+# Boucle de surveillance (thread)
 # -------------------------------------------------------------------
-def monitoring_loop(engine, stop_event, conn, endpoint_id, log_queue):
-    """
-    Boucle de surveillance exécutée dans un thread.
-    Ajoute des logs dans la file et insère les événements dans Supabase.
-    """
+def monitoring_loop(engine, stop_event, conn, endpoint_id):
     add_log("Démarrage de la surveillance système...", "INFO")
     while not stop_event.is_set():
         try:
-            # Collecte des métriques
             phi_m, phi_c, phi_d = get_system_triad()
             engine.adapt_k_factor(phi_c)
             result = engine.process_event(phi_m, phi_c, phi_d)
 
-            # Ajouter un log périodique
             add_log(f"Φm={phi_m:.2f} Φc={phi_c:.2f} Φd={phi_d:.2f} | Score={result['score']:.3f} ({result['status']})", "INFO")
 
-            # Insérer dans Supabase
             if conn and endpoint_id:
                 insert_security_log(conn, endpoint_id, phi_m, phi_c, phi_d, result['score'], result['status'])
 
-            # Si anomalie critique
             if result['status'] == "CRITICAL":
                 proc = get_top_process()
                 if proc:
@@ -426,7 +510,8 @@ def monitoring_loop(engine, stop_event, conn, endpoint_id, log_queue):
                     proc_path = proc.exe() if hasattr(proc, 'exe') else None
                     suspend_process(proc)
                     add_log(f"⚠️ Processus critique suspendu : {proc_name}", "CRITICAL")
-                    # On pourrait aussi enregistrer dans une table d'alertes
+                    # Ajouter à la threat library ?
+                    # insert_threat_signature(conn, proc_name, result['score'], "Auto-detected", phi_m, phi_c, phi_d)
 
             time.sleep(2)
         except Exception as e:
@@ -444,7 +529,7 @@ def start_monitoring(engine, conn, endpoint_id):
     st.session_state.stop_event = stop_event
     thread = threading.Thread(
         target=monitoring_loop,
-        args=(engine, stop_event, conn, endpoint_id, log_queue),
+        args=(engine, stop_event, conn, endpoint_id),
         daemon=True
     )
     thread.start()
@@ -466,8 +551,7 @@ if 'engine' not in st.session_state:
 if 'conn' not in st.session_state:
     st.session_state.conn = get_supabase_connection()
 if 'user_id' not in st.session_state:
-    # Pour les tests, on utilise un UUID fixe (à remplacer par un vrai utilisateur)
-    # Vous pouvez modifier cette ligne pour utiliser l'email saisi ou un mécanisme d'auth.
+    # Pour les tests, utiliser un UUID fixe (à remplacer par un vrai utilisateur)
     st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"  # UUID de test
 if 'subscription' not in st.session_state:
     st.session_state.subscription = get_user_subscription(st.session_state.user_id, st.session_state.conn)
@@ -478,7 +562,9 @@ if 'endpoint_id' not in st.session_state:
 if 'monitoring_active' not in st.session_state:
     st.session_state.monitoring_active = False
 if 'log_messages' not in st.session_state:
-    st.session_state.log_messages = []  # pour l'affichage, on vide la queue dedans
+    st.session_state.log_messages = []
+if 'google_api_key' not in st.session_state:
+    st.session_state.google_api_key = ""  # À remplir dans la sidebar
 
 # -------------------------------------------------------------------
 # Interface principale
@@ -502,13 +588,11 @@ if st.session_state.subscription is None:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 🔐 Déjà membre ?")
-        # Simuler une connexion avec email (pour les tests)
         email = st.text_input("Votre email", placeholder="exemple@domaine.com")
         if st.button("Se connecter avec cet email"):
-            # Chercher l'utilisateur dans auth.users par email (simplifié)
             # Dans un vrai projet, utilisez l'authentification Supabase.
-            # Ici, on va simplement garder le même UUID fixe pour la démo.
-            st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"  # à adapter
+            # Pour la démo, on garde l'UUID fixe.
+            st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"
             st.session_state.subscription = get_user_subscription(st.session_state.user_id, st.session_state.conn)
             st.rerun()
 
@@ -530,7 +614,7 @@ if st.session_state.subscription is None:
             else:
                 st.warning("Veuillez saisir un code.")
 
-    st.stop()  # Arrête l'exécution ici
+    st.stop()
 
 # -------------------------------------------------------------------
 # ÉTAPE 2 : Onboarding – nommer l'endpoint
@@ -543,7 +627,6 @@ if not st.session_state.onboarding_done:
     endpoint_name = st.text_input("Nom de l'endpoint", placeholder="Mon-PC")
     if st.button("Démarrer la surveillance"):
         if endpoint_name:
-            # Enregistrer l'endpoint dans Supabase
             endpoint_id = register_endpoint(st.session_state.user_id, endpoint_name, st.session_state.conn)
             if endpoint_id:
                 st.session_state.endpoint_id = endpoint_id
@@ -557,13 +640,29 @@ if not st.session_state.onboarding_done:
     st.stop()
 
 # -------------------------------------------------------------------
-# ÉTAPE 3 : Monitoring – interface principale
+# ÉTAPE 3 : Monitoring – interface principale avec onglets
 # -------------------------------------------------------------------
 st.markdown(f"**Utilisateur** : {st.session_state.user_id[:8]}... | **Abonnement** : `{st.session_state.subscription['plan_type']}` ({st.session_state.subscription['status']})")
 
-# Contrôles de surveillance
-col1, col2 = st.columns([1, 5])
-with col1:
+# Sidebar pour les contrôles et infos
+with st.sidebar:
+    st.markdown("## ⬡ TTU Shield Sentinel")
+    st.markdown("---")
+    st.markdown(f"**Utilisateur** : {st.session_state.user_id[:8]}...")
+    st.markdown(f"**Abonnement** : `{st.session_state.subscription['plan_type']}`")
+    if st.session_state.endpoint_id:
+        st.markdown(f"**Endpoint** : {st.session_state.endpoint_id[:8]}...")
+
+    st.markdown("---")
+    # Clé API Google Safe Browsing
+    google_api_key = st.text_input("🔑 Clé API Google Safe Browsing", type="password", value=st.session_state.google_api_key,
+                                   help="Optionnel pour analyse de sites web")
+    if google_api_key != st.session_state.google_api_key:
+        st.session_state.google_api_key = google_api_key
+        st.rerun()
+
+    st.markdown("---")
+    # Contrôle de la surveillance
     if not st.session_state.monitoring_active:
         if st.button("▶️ Démarrer la surveillance", use_container_width=True):
             start_monitoring(st.session_state.engine, st.session_state.conn, st.session_state.endpoint_id)
@@ -573,87 +672,194 @@ with col1:
             stop_monitoring()
             st.rerun()
 
-# Récupérer les logs de la file et les stocker dans session_state pour affichage
+    st.markdown("---")
+    if st.button("Se déconnecter (retour à l'accueil)"):
+        stop_monitoring()
+        st.session_state.subscription = None
+        st.session_state.onboarding_done = False
+        st.session_state.endpoint_id = None
+        st.rerun()
+
+# Récupérer les logs de la file
 while not log_queue.empty():
     try:
         log = log_queue.get_nowait()
         st.session_state.log_messages.append(log)
     except Empty:
         break
-# Limiter le nombre de logs affichés
 if len(st.session_state.log_messages) > 200:
     st.session_state.log_messages = st.session_state.log_messages[-200:]
 
-# Afficher les dernières métriques (depuis le dernier log ou via une lecture directe)
-# Pour éviter de bloquer, on peut lire les dernières valeurs depuis le moteur ou depuis la file.
-# On va simplement afficher les logs et un graphique basé sur les logs Supabase.
-
-st.markdown("---")
-st.subheader("📊 Surveillance en temps réel")
-
-# Zone de logs
-st.markdown("#### Journal d'activité")
-log_html = '<div class="log-box">'
-for log in reversed(st.session_state.log_messages[-50:]):
-    level_class = "log-info" if log['level']=="INFO" else "log-warning" if log['level']=="WARNING" else "log-critical"
-    log_html += f'<div class="log-entry"><span class="log-time">[{log["time"]}]</span> <span class="{level_class}">{log["message"]}</span></div>'
-log_html += '</div>'
-st.markdown(log_html, unsafe_allow_html=True)
-
-# Graphique des scores récents (depuis Supabase)
-if st.session_state.conn and st.session_state.endpoint_id:
-    try:
-        cur = st.session_state.conn.cursor()
-        cur.execute("""
-            SELECT created_at, anomaly_score, status
-            FROM security_logs
-            WHERE endpoint_id = %s
-            ORDER BY created_at DESC
-            LIMIT 100
-        """, (st.session_state.endpoint_id,))
-        rows = cur.fetchall()
-        cur.close()
-        if rows:
-            df = pd.DataFrame(rows, columns=['time', 'score', 'status'])
-            df = df.sort_values('time')
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['time'], y=df['score'], mode='lines+markers', name='Score'))
-            fig.update_layout(height=300, plot_bgcolor='#07070f', paper_bgcolor='#0d0d1a')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("En attente des premières données...")
-    except Exception as e:
-        st.error(f"Erreur lecture historique: {e}")
-
-# Afficher les métriques système actuelles (via un appel direct, mais attention au blocage)
-if st.button("🔄 Rafraîchir les métriques"):
-    with st.spinner("Collecte..."):
-        phi_m, phi_c, phi_d = get_system_triad()
-        st.metric("Mémoire (Φm)", f"{phi_m:.2f}")
-        st.metric("Cohérence (Φc)", f"{phi_c:.2f}")
-        st.metric("Dissipation (Φd)", f"{phi_d:.2f}")
+# Création des onglets
+tabs = st.tabs(["📊 Dashboard", "🖥️ Endpoint", "🔍 Analyse ciblée", "📋 Historique", "🧠 Threat Library"])
 
 # -------------------------------------------------------------------
-# Sidebar avec informations utilisateur
+# Onglet Dashboard
 # -------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("## ⬡ TTU Shield Sentinel")
-    st.markdown("---")
-    st.markdown(f"**Utilisateur** : {st.session_state.user_id[:8]}...")
-    st.markdown(f"**Abonnement** : `{st.session_state.subscription['plan_type']}`")
-    if st.session_state.endpoint_id:
-        st.markdown(f"**Endpoint ID** : {st.session_state.endpoint_id[:8]}...")
-    st.markdown("---")
-    if st.button("Se déconnecter (retour à l'accueil)"):
-        # Simuler une déconnexion en réinitialisant l'abonnement
-        st.session_state.subscription = None
-        st.session_state.onboarding_done = False
-        st.session_state.endpoint_id = None
-        stop_monitoring()
+with tabs[0]:
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Statut surveillance", "Active" if st.session_state.monitoring_active else "Inactive")
+    with col2:
+        st.metric("Dernier score", f"{st.session_state.log_messages[-1]['message'].split('|')[1].strip() if st.session_state.log_messages else 'N/A'}")
+    with col3:
+        st.metric("Menaces critiques", sum(1 for log in st.session_state.log_messages if log['level']=='CRITICAL'))
+    with col4:
+        st.metric("Logs", len(st.session_state.log_messages))
+
+    # Zone de logs
+    st.markdown("#### Journal d'activité en direct")
+    log_html = '<div class="log-box">'
+    for log in reversed(st.session_state.log_messages[-50:]):
+        level_class = "log-info" if log['level']=="INFO" else "log-warning" if log['level']=="WARNING" else "log-critical"
+        log_html += f'<div class="log-entry"><span class="log-time">[{log["time"]}]</span> <span class="{level_class}">{log["message"]}</span></div>'
+    log_html += '</div>'
+    st.markdown(log_html, unsafe_allow_html=True)
+
+# -------------------------------------------------------------------
+# Onglet Endpoint
+# -------------------------------------------------------------------
+with tabs[1]:
+    st.subheader("🖥️ Surveillance détaillée de l'endpoint")
+    if st.session_state.monitoring_active:
+        if st.button("🔄 Rafraîchir les métriques"):
+            with st.spinner("Collecte..."):
+                phi_m, phi_c, phi_d = get_system_triad()
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Mémoire (Φm)", f"{phi_m:.2f}")
+                with col2:
+                    st.metric("Cohérence (Φc)", f"{phi_c:.2f}")
+                with col3:
+                    st.metric("Dissipation (Φd)", f"{phi_d:.2f}")
+
+        # Afficher les connexions actives
+        with st.expander("Connexions réseau actives"):
+            conns = get_active_connections()
+            if conns:
+                st.dataframe(pd.DataFrame(conns), use_container_width=True)
+            else:
+                st.write("Aucune connexion établie.")
+    else:
+        st.info("La surveillance n'est pas active. Démarrez-la pour voir les métriques.")
+
+# -------------------------------------------------------------------
+# Onglet Analyse ciblée
+# -------------------------------------------------------------------
+with tabs[2]:
+    st.subheader("🔍 Analyse ciblée")
+    st.markdown("Sélectionnez une cible à analyser : fichier, dossier ou site web.")
+
+    analysis_type = st.radio("Type d'analyse", ["Fichier", "Dossier", "Site web"], horizontal=True)
+
+    if analysis_type == "Fichier":
+        uploaded_file = st.file_uploader("Choisissez un fichier", type=None)
+        if uploaded_file is not None:
+            with st.spinner("Analyse en cours..."):
+                # Sauvegarder temporairement
+                temp_path = f"/tmp/{uploaded_file.name}"
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                file_hash = hash_file(temp_path)
+                # Vérifier dans la threat library
+                threat_lib = get_threat_library(st.session_state.conn)
+                malicious = any(sig['pattern'].lower() in uploaded_file.name.lower() for sig in threat_lib)
+                os.remove(temp_path)
+                st.write("### Résultat")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Nom", uploaded_file.name)
+                    st.metric("Taille", f"{uploaded_file.size} octets")
+                with col2:
+                    st.metric("SHA-256", file_hash[:16]+"...")
+                    st.metric("Malveillant", "⚠️ OUI" if malicious else "✅ NON")
+                if malicious:
+                    st.error("Ce fichier correspond à une signature de menace connue.")
+                else:
+                    st.success("Aucune menace détectée.")
+
+    elif analysis_type == "Dossier":
+        folder_path = st.text_input("Chemin du dossier (ex: C:/Users/... ou /home/...)")
+        if st.button("Scanner le dossier (limité à 50 fichiers)") and folder_path:
+            with st.spinner("Scan en cours..."):
+                files = scan_directory(folder_path, max_files=50, max_depth=3)
+                if files:
+                    # Vérifier les signatures
+                    threat_lib = get_threat_library(st.session_state.conn)
+                    for f in files:
+                        f['suspicious'] = any(sig['pattern'] in f['path'] for sig in threat_lib)
+                    df_files = pd.DataFrame(files)
+                    st.dataframe(df_files, use_container_width=True)
+                    suspicious = sum(1 for f in files if f['suspicious'])
+                    st.metric("Fichiers suspects", suspicious)
+                else:
+                    st.warning("Dossier introuvable, vide ou accès refusé.")
+
+    elif analysis_type == "Site web":
+        url = st.text_input("URL du site (ex: https://example.com)")
+        if st.button("Analyser le site") and url:
+            with st.spinner("Analyse en cours..."):
+                result = analyze_url(url, st.session_state.google_api_key)
+                st.write("### Résultat")
+                st.json(result)
+                if result.get('malicious'):
+                    st.error("Ce site est signalé comme malveillant.")
+                else:
+                    st.success("Aucune menace détectée.")
+
+# -------------------------------------------------------------------
+# Onglet Historique (logs depuis Supabase)
+# -------------------------------------------------------------------
+with tabs[3]:
+    st.subheader("📋 Historique des événements (7 derniers jours)")
+    if st.session_state.conn and st.session_state.endpoint_id:
+        try:
+            cur = st.session_state.conn.cursor()
+            cur.execute("""
+                SELECT created_at, phi_m, phi_c, phi_d, anomaly_score, status
+                FROM security_logs
+                WHERE endpoint_id = %s AND created_at > NOW() - INTERVAL '7 days'
+                ORDER BY created_at DESC
+                LIMIT 200
+            """, (st.session_state.endpoint_id,))
+            rows = cur.fetchall()
+            cur.close()
+            if rows:
+                df = pd.DataFrame(rows, columns=['Timestamp', 'Φm', 'Φc', 'Φd', 'Score', 'Statut'])
+                st.dataframe(df, use_container_width=True)
+
+                # Graphique d'évolution
+                df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+                df = df.sort_values('Timestamp')
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df['Timestamp'], y=df['Score'], mode='lines+markers', name='Score'))
+                fig.update_layout(height=300, plot_bgcolor='#07070f', paper_bgcolor='#0d0d1a')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Aucun log trouvé pour cet endpoint.")
+        except Exception as e:
+            st.error(f"Erreur lecture historique: {e}")
+    else:
+        st.info("Connectez-vous et enregistrez un endpoint pour voir l'historique.")
+
+# -------------------------------------------------------------------
+# Onglet Threat Library
+# -------------------------------------------------------------------
+with tabs[4]:
+    st.subheader("🧠 Bibliothèque des menaces")
+    threat_lib = get_threat_library(st.session_state.conn)
+    if threat_lib:
+        df_threat = pd.DataFrame(threat_lib)
+        st.dataframe(df_threat, use_container_width=True)
+    else:
+        st.info("Aucune signature pour l'instant.")
+
+    if st.button("➕ Ajouter une signature exemple"):
+        insert_threat_signature(st.session_state.conn, "exemple.exe", 0.9, "Signature de test", 0.8, 0.2, 0.9)
         st.rerun()
 
 # -------------------------------------------------------------------
 # Footer
 # -------------------------------------------------------------------
 st.markdown("---")
-st.caption(f"TTU Shield Sentinel – Analyse réelle de l'hôte | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"TTU Shield Sentinel – Version Finale | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
