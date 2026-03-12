@@ -234,59 +234,45 @@ import streamlit as st
 import psycopg2
 from psycopg2 import Error
 
-# Configuration de la disponibilité
+# Activation du module de base de données
 SUPPORTS_SUPABASE = True 
 
 @st.cache_resource
 def get_supabase_connection():
-    """
-    Établit une connexion persistante à Supabase en utilisant 
-    la section [postgres] définie dans les secrets Streamlit.
-    """
+    """Établit la connexion avec les paramètres du Session Pooler IPv4."""
     if not SUPPORTS_SUPABASE:
         return None
         
     try:
-        # CORRECTION : On vérifie "postgres" car c'est le nom dans vos secrets
+        # Vérification de la présence de la section [postgres]
         if "postgres" not in st.secrets:
-            st.sidebar.error("Section [postgres] introuvable dans les secrets Streamlit.")
+            st.sidebar.error("Configuration [postgres] introuvable dans les Secrets.")
             return None
             
+        creds = st.secrets["postgres"]
+        
         conn = psycopg2.connect(
-            host=st.secrets["postgres"]["host"],
-            port=st.secrets["postgres"]["port"],
-            database=st.secrets["postgres"]["database"],
-            user=st.secrets["postgres"]["user"],
-            password=st.secrets["postgres"]["password"], # Correction de la faute de frappe ici
+            host=creds["host"],
+            port=creds["port"],
+            database=creds["database"],
+            user=creds["user"],
+            password=creds["password"],
             sslmode='require',
-            connect_timeout=10
+            connect_timeout=15  # Un peu plus de temps pour le pooler
         )
         return conn
-    except (Exception, Error) as e:
-        st.sidebar.error(f"Connexion Supabase échouée : {e}")
+    except Exception as e:
+        st.sidebar.error(f"Échec de connexion Supabase : {e}")
         return None
 
-# --- Initialisation de la connexion ---
+# Initialisation
 conn = get_supabase_connection()
 
 if conn:
-    st.sidebar.success("✅ Connecté à Supabase (TTU-EDR)")
+    st.sidebar.success("✅ Connecté à Supabase (Session Pooler)")
 else:
-    # Ce message s'affichera si le bloc "if 'postgres' not in st.secrets" est déclenché
-    st.sidebar.warning("⚠️ Mode local : Supabase non configuré")
-
-# --- Fonction de sauvegarde ---
-def log_critical_alert(heure, score, statut):
-    if conn:
-        try:
-            cursor = conn.cursor()
-            query = "INSERT INTO edr_logs (heure, score, statut) VALUES (%s, %s, %s);"
-            cursor.execute(query, (heure, score, statut))
-            conn.commit()
-            cursor.close()
-        except Exception as e:
-            st.error(f"Erreur lors de l'enregistrement : {e}")
-
+    st.sidebar.warning("⚠️ Connexion à la base de données impossible")
+  
 
 # ─────────────────────────────────────────────
 # SIDEBAR — CONTRÔLES
