@@ -314,9 +314,17 @@ with st.sidebar:
             if st.button("🔄 Rafraîchir endpoints"):
                 st.session_state.live_endpoints = fetch_live_endpoints()
                 st.rerun()
+              
+    # Mode live data (Utilise la connexion 'conn' établie plus haut)
+    if conn:
+        st.session_state.use_live_data = st.checkbox("🌐 Utiliser les données live Supabase", value=st.session_state.use_live_data)
+        if st.session_state.use_live_data:
+            if st.button("🔄 Rafraîchir endpoints"):
+                # Assurez-vous que la fonction fetch_live_endpoints() est bien définie
+                st.session_state.live_endpoints = fetch_live_endpoints()
+                st.rerun()
     else:
         st.session_state.use_live_data = False
-        st.info("Pour activer Supabase, installez psycopg2 et configurez les secrets.")
 
     st.markdown("### 💉 Injection de Menace (simulation)")
     inject_type = st.selectbox("Type", ["Trafic Normal", "Anomalie SQL", "RCE", "Brute Force", "Exfiltration"])
