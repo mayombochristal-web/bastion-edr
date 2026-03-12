@@ -230,24 +230,26 @@ if 'live_endpoints' not in st.session_state:
 # ─────────────────────────────────────────────
 # FONCTIONS SUPABASE (optionnel)
 # ─────────────────────────────────────────────
-# Configuration de la disponibilité de Supabase
-# Assurez-vous que cette variable est définie sur True pour activer la connexion
+import streamlit as st
+import psycopg2
+from psycopg2 import Error
+
+# Configuration de la disponibilité
 SUPPORTS_SUPABASE = True 
 
 @st.cache_resource
 def get_supabase_connection():
     """
-    Établit une connexion persistante à Supabase.
-    L'utilisation de @st.cache_resource évite de rouvrir une connexion
-    à chaque interaction sur l'interface Streamlit.
+    Établit une connexion persistante à Supabase en utilisant 
+    la section [postgres] définie dans les secrets Streamlit.
     """
     if not SUPPORTS_SUPABASE:
         return None
         
     try:
-        # Vérification de la présence des secrets avant tentative
-        if "supabase" not in st.secrets:
-            st.sidebar.error("Secrets 'supabase' manquants dans la configuration.")
+        # CORRECTION : On vérifie "postgres" car c'est le nom dans vos secrets
+        if "postgres" not in st.secrets:
+            st.sidebar.error("Section [postgres] introuvable dans les secrets Streamlit.")
             return None
             
         conn = psycopg2.connect(
@@ -255,8 +257,8 @@ def get_supabase_connection():
             port=st.secrets["postgres"]["port"],
             database=st.secrets["postgres"]["database"],
             user=st.secrets["postgres"]["user"],
-            password=st.secrets["spostgres"]["password"],
-            sslmode='require', # Obligatoire pour la sécurité Supabase
+            password=st.secrets["postgres"]["password"], # Correction de la faute de frappe ici
+            sslmode='require',
             connect_timeout=10
         )
         return conn
@@ -269,12 +271,11 @@ conn = get_supabase_connection()
 
 if conn:
     st.sidebar.success("✅ Connecté à Supabase (TTU-EDR)")
-    # Optionnel : Afficher un indicateur de statut dans l'interface
-    # st.sidebar.info(f"Hôte : {st.secrets['supabase']['host']}")
 else:
-    st.sidebar.warning("⚠️ Mode local : Supabase non connecté")
+    # Ce message s'affichera si le bloc "if 'postgres' not in st.secrets" est déclenché
+    st.sidebar.warning("⚠️ Mode local : Supabase non configuré")
 
-# --- Exemple de fonction pour sauvegarder un incident CRITICAL ---
+# --- Fonction de sauvegarde ---
 def log_critical_alert(heure, score, statut):
     if conn:
         try:
@@ -285,7 +286,6 @@ def log_critical_alert(heure, score, statut):
             cursor.close()
         except Exception as e:
             st.error(f"Erreur lors de l'enregistrement : {e}")
-        return pd.DataFrame()
 
 
 # ─────────────────────────────────────────────
