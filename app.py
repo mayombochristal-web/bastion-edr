@@ -272,6 +272,21 @@ if conn:
     st.sidebar.success("✅ Connecté à Supabase (Session Pooler)")
 else:
     st.sidebar.warning("⚠️ Connexion à la base de données impossible")
+
+def fetch_live_endpoints():
+    """Récupère la liste des endpoints et leur état depuis Supabase."""
+    if not conn:
+        return pd.DataFrame()
+        
+    try:
+        # On utilise une requête SQL pour récupérer vos colonnes
+        # Ajustez les noms des colonnes (pseudo, os, phi_m, etc.) selon votre table réelle
+        query = "SELECT pseudo, os, ip_address, phi_m, protection_status FROM endpoints_ttu;"
+        df = pd.read_sql(query, conn)
+        return df
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération des données : {e}")
+        return pd.DataFrame()
   
 
 # ─────────────────────────────────────────────
