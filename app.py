@@ -230,39 +230,61 @@ if 'live_endpoints' not in st.session_state:
 # ─────────────────────────────────────────────
 # FONCTIONS SUPABASE (optionnel)
 # ─────────────────────────────────────────────
+# Configuration de la disponibilité de Supabase
+# Assurez-vous que cette variable est définie sur True pour activer la connexion
+SUPPORTS_SUPABASE = True 
+
+@st.cache_resource
 def get_supabase_connection():
-    """Retourne une connexion psycopg2 si les secrets sont configurés."""
+    """
+    Établit une connexion persistante à Supabase.
+    L'utilisation de @st.cache_resource évite de rouvrir une connexion
+    à chaque interaction sur l'interface Streamlit.
+    """
     if not SUPPORTS_SUPABASE:
         return None
+        
     try:
+        # Vérification de la présence des secrets avant tentative
+        if "supabase" not in st.secrets:
+            st.sidebar.error("Secrets 'supabase' manquants dans la configuration.")
+            return None
+            
         conn = psycopg2.connect(
             host=st.secrets["supabase"]["host"],
             port=st.secrets["supabase"]["port"],
             database=st.secrets["supabase"]["database"],
             user=st.secrets["supabase"]["user"],
-            password=st.secrets["supabase"]["password"]
+            password=st.secrets["supabase"]["password"],
+            sslmode='require', # Obligatoire pour la sécurité Supabase
+            connect_timeout=10
         )
         return conn
-    except Exception as e:
-        st.warning(f"Connexion Supabase échouée : {e}")
+    except (Exception, Error) as e:
+        st.sidebar.error(f"Connexion Supabase échouée : {e}")
         return None
 
-def fetch_live_endpoints():
-    """Récupère les endpoints depuis Supabase."""
-    conn = get_supabase_connection()
-    if conn is None:
-        return pd.DataFrame()
-    query = """
-    SELECT pseudo, ip_address, os, protection_status, phi_m, phi_c, phi_d, last_sync 
-    FROM public.endpoints 
-    ORDER BY last_sync DESC;
-    """
-    try:
-        df = pd.read_sql(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Erreur lors de la récupération des endpoints : {e}")
+# --- Initialisation de la connexion ---
+conn = get_supabase_connection()
+
+if conn:
+    st.sidebar.success("✅ Connecté à Supabase (TTU-EDR)")
+    # Optionnel : Afficher un indicateur de statut dans l'interface
+    # st.sidebar.info(f"Hôte : {st.secrets['supabase']['host']}")
+else:
+    st.sidebar.warning("⚠️ Mode local : Supabase non connecté")
+
+# --- Exemple de fonction pour sauvegarder un incident CRITICAL ---
+def log_critical_alert(heure, score, statut):
+    if conn:
+        try:
+            cursor = conn.cursor()
+            query = "INSERT INTO edr_logs (heure, score, statut) VALUES (%s, %s, %s);"
+            cursor.execute(query, (heure, score, statut))
+            conn.commit()
+            cursor.close()
+        except Exception as e:
+            st.error(f"Erreur lors de l'enregistrement : {e}")
         return pd.DataFrame()
 
 
