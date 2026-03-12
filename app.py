@@ -346,7 +346,7 @@ if 'hostname' not in st.session_state:
     st.session_state.hostname = socket.gethostname()
 if 'user_id' not in st.session_state:
     # Dans une vraie app, l'utilisateur serait authentifié. Pour la démo, on utilise un ID fixe.
-    st.session_state.user_id = "00000000-0000-0000-0000-000000000001"
+    st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"
 
 # Données réelles collectées
 if 'endpoint_history' not in st.session_state:
