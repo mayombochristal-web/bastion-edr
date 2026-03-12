@@ -334,29 +334,49 @@ def get_user_subscription(user_id, conn):
 # -------------------------------------------------------------------
 # Session State
 # -------------------------------------------------------------------
-if 'engine' not in st.session_state:
-    st.session_state.engine = TTUEngineAuto()
-if 'protection_active' not in st.session_state:
-    st.session_state.protection_active = False
-if 'monitor_thread' not in st.session_state:
-    st.session_state.monitor_thread = None
-if 'conn' not in st.session_state:
-    st.session_state.conn = get_supabase_connection()
-if 'hostname' not in st.session_state:
-    st.session_state.hostname = socket.gethostname()
-if 'user_id' not in st.session_state:
-    # Dans une vraie app, l'utilisateur serait authentifié. Pour la démo, on utilise un ID fixe.
-    st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"
+def initialize_session_state():
+    """
+    Initialise toutes les variables de session nécessaires au fonctionnement de l'EDR.
+    Regrouper ici permet d'éviter les vérifications éparpillées dans le code.
+    """
+    
+    # 1. Moteurs et Connexions
+    if 'engine' not in st.session_state:
+        st.session_state.engine = TTUEngineAuto()
+        
+    if 'conn' not in st.session_state:
+        st.session_state.conn = get_supabase_connection()
+        
+    # 2. États de Contrôle
+    if 'protection_active' not in st.session_state:
+        st.session_state.protection_active = False
+        
+    if 'monitor_thread' not in st.session_state:
+        st.session_state.monitor_thread = None
+        
+    # 3. Identité et Contexte
+    if 'hostname' not in st.session_state:
+        st.session_state.hostname = socket.gethostname()
+        
+    if 'user_id' not in st.session_state:
+        # ID persistant pour la session de démo
+        st.session_state.user_id = "a696b926-eb23-4f8d-b4d3-f6bb0527a2f3"
 
-# Données réelles collectées
-if 'endpoint_history' not in st.session_state:
-    st.session_state.endpoint_history = []      # liste de dicts
-if 'alerts' not in st.session_state:
-    st.session_state.alerts = []
-if 'attack_events' not in st.session_state:
-    st.session_state.attack_events = []          # pour la carte (simulée)
-if 'threat_library' not in st.session_state:
-    st.session_state.threat_library = []         # signatures locales (pourra être enrichie)
+    # 4. Stockage des Données (Listes et Historiques)
+    # On utilise des dictionnaires par défaut pour faciliter l'accès futur
+    defaults = {
+        'endpoint_history': [],  # Historique des métriques système
+        'alerts': [],            # Alertes de sécurité détectées
+        'attack_events': [],     # Événements pour la cartographie
+        'threat_library': []     # Signatures et base de menaces locale
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+# Appels de la fonction d'initialisation au démarrage de l'app
+initialize_session_state()
 
 # -------------------------------------------------------------------
 # Boucle de surveillance réelle (thread) – reçoit l'engine en argument
