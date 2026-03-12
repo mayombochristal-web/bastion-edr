@@ -251,11 +251,11 @@ def get_supabase_connection():
             return None
             
         conn = psycopg2.connect(
-            host=st.secrets["supabase"]["host"],
-            port=st.secrets["supabase"]["port"],
-            database=st.secrets["supabase"]["database"],
-            user=st.secrets["supabase"]["user"],
-            password=st.secrets["supabase"]["password"],
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["spostgres"]["password"],
             sslmode='require', # Obligatoire pour la sécurité Supabase
             connect_timeout=10
         )
