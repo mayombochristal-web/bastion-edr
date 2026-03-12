@@ -31,6 +31,17 @@ try:
     SUPPORTS_SUPABASE = True
 except ImportError:
     SUPPORTS_SUPABASE = False
+    
+if 'engine' not in st.session_state:
+    st.session_state.engine = "initialisé" # Ou ton objet moteur TTU-MC3
+
+# Pour ton thread de monitoring, passe l'objet directement au lieu de le lire dans session_state
+def monitoring_loop(engine_instance):
+    # Utilise engine_instance au lieu de st.session_state.engine
+    pass
+
+# Lors du lancement du thread
+# thread = threading.Thread(target=monitoring_loop, args=(st.session_state.engine,))
 
 # Configuration de la page Streamlit
 st.set_page_config(
