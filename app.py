@@ -5,6 +5,7 @@
 TTU Shield Sentinel – Version Finale Professionnelle
 Avec analyse réelle de l'hôte, threads stables, paywall,
 onboarding, logs temps réel, analyse ciblée et historique.
+Correction des transactions PostgreSQL.
 """
 
 import streamlit as st
@@ -20,6 +21,7 @@ import uuid
 import os
 import socket
 import platform
+import requests
 from datetime import datetime, timedelta
 from collections import deque
 from queue import Queue, Empty
@@ -319,7 +321,7 @@ def analyze_url(url, google_api_key=None):
     return {"malicious": random.random() < 0.2, "method": "Simulation"}
 
 # -------------------------------------------------------------------
-# Connexion Supabase et fonctions de persistance
+# Connexion Supabase et fonctions de persistance (avec rollback)
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_supabase_connection():
@@ -374,9 +376,11 @@ def validate_invite_code(code, user_id, conn):
         """, (code,))
         row = cur.fetchone()
         if not row:
+            cur.close()
             return None
         invite_id, plan_type, is_used = row
         if is_used:
+            cur.close()
             return None
         cur.execute("""
             UPDATE invitations
@@ -387,6 +391,7 @@ def validate_invite_code(code, user_id, conn):
         cur.close()
         return plan_type
     except Exception as e:
+        conn.rollback()
         st.error(f"Erreur validation code: {e}")
         return None
 
@@ -405,6 +410,7 @@ def create_subscription_from_invite(user_id, plan_type, conn):
         cur.close()
         return True
     except Exception as e:
+        conn.rollback()
         st.error(f"Erreur création abonnement: {e}")
         return False
 
@@ -429,6 +435,7 @@ def register_endpoint(user_id, endpoint_name, conn):
         cur.close()
         return endpoint_id
     except Exception as e:
+        conn.rollback()
         st.error(f"Erreur enregistrement endpoint: {e}")
         return None
 
@@ -445,6 +452,7 @@ def insert_security_log(conn, endpoint_id, phi_m, phi_c, phi_d, score, status, d
         conn.commit()
         cur.close()
     except Exception as e:
+        conn.rollback()
         st.error(f"Erreur insertion log: {e}")
 
 def insert_threat_signature(conn, pattern, weight, description, phi_m, phi_c, phi_d):
@@ -459,6 +467,7 @@ def insert_threat_signature(conn, pattern, weight, description, phi_m, phi_c, ph
         conn.commit()
         cur.close()
     except Exception as e:
+        conn.rollback()
         st.error(f"Erreur insertion threat_library: {e}")
 
 def get_threat_library(conn):
@@ -510,7 +519,7 @@ def monitoring_loop(engine, stop_event, conn, endpoint_id):
                     proc_path = proc.exe() if hasattr(proc, 'exe') else None
                     suspend_process(proc)
                     add_log(f"⚠️ Processus critique suspendu : {proc_name}", "CRITICAL")
-                    # Ajouter à la threat library ?
+                    # Optionnel : ajouter à la threat library
                     # insert_threat_signature(conn, proc_name, result['score'], "Auto-detected", phi_m, phi_c, phi_d)
 
             time.sleep(2)
@@ -701,7 +710,13 @@ with tabs[0]:
     with col1:
         st.metric("Statut surveillance", "Active" if st.session_state.monitoring_active else "Inactive")
     with col2:
-        st.metric("Dernier score", f"{st.session_state.log_messages[-1]['message'].split('|')[1].strip() if st.session_state.log_messages else 'N/A'}")
+        # Extraire le dernier score du dernier log
+        last_score = "N/A"
+        if st.session_state.log_messages:
+            last_msg = st.session_state.log_messages[-1]['message']
+            if "Score=" in last_msg:
+                last_score = last_msg.split("Score=")[1].split(" ")[0]
+        st.metric("Dernier score", last_score)
     with col3:
         st.metric("Menaces critiques", sum(1 for log in st.session_state.log_messages if log['level']=='CRITICAL'))
     with col4:
