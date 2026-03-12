@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-TTU BASTION EDR - Cockpit Souverain (version compatible ttu_core)
-Connexion PostgreSQL avec SQLAlchemy, tables dans le schéma ttu_core.
+TTU BASTION EDR - Cockpit Souverain (version compatible schéma public)
+Connexion PostgreSQL avec SQLAlchemy, tables dans le schéma public.
 """
 
 import streamlit as st
@@ -69,7 +69,7 @@ engine = init_engine()
 def get_orgs():
     query = """
         SELECT id, name, k_factor, adaptive_threshold, bypass_quota
-        FROM ttu_core.organizations
+        FROM organizations
         ORDER BY name
     """
     with engine.connect() as conn:
@@ -79,7 +79,7 @@ def get_orgs():
 def get_endpoints(org_id=None):
     query = """
         SELECT id, org_id, name, ip_address, os, protection_status, last_seen
-        FROM ttu_core.endpoints
+        FROM endpoints
     """
     params = {}
     if org_id:
@@ -94,7 +94,7 @@ def get_audit_logs(org_id=None, limit=500):
     query = """
         SELECT id, org_id, endpoint_id, timestamp, kmass_score, ml_anomaly_score,
                signature_match, status
-        FROM ttu_core.audit_logs_global
+        FROM audit_logs_global
     """
     params = {}
     if org_id:
@@ -111,8 +111,8 @@ def get_quarantine(org_id=None):
         SELECT q.id, q.org_id, q.endpoint_id, q.payload_hash, q.reason,
                q.quarantined_at, q.analyzed,
                e.name as endpoint_name, e.ip_address as endpoint_ip
-        FROM ttu_core.quarantine_vault q
-        LEFT JOIN ttu_core.endpoints e ON q.endpoint_id = e.id
+        FROM quarantine_vault q
+        LEFT JOIN endpoints e ON q.endpoint_id = e.id
     """
     params = {}
     if org_id:
@@ -126,7 +126,7 @@ def get_quarantine(org_id=None):
 def get_subscriptions(org_id=None):
     query = """
         SELECT org_id, plan_name, start_date, end_date, logs_quota
-        FROM ttu_core.subscriptions
+        FROM subscriptions
     """
     params = {}
     if org_id:
@@ -142,7 +142,7 @@ def get_logs_per_second(org_id=None, minutes=5):
         SELECT
             date_trunc('minute', timestamp) as minute,
             COUNT(*) as logs
-        FROM ttu_core.audit_logs_global
+        FROM audit_logs_global
         WHERE timestamp > NOW() - INTERVAL ':minutes minutes'
     """
     params = {"minutes": minutes}
@@ -157,12 +157,15 @@ def get_logs_per_second(org_id=None, minutes=5):
     return 0.0
 
 # =====================================================
-# BATTEMENT DE CŒUR
+# BATTEMENT DE CŒUR (fonction commentée car non présente en base)
 # =====================================================
 def run_heartbeat():
     with engine.connect() as conn:
-        conn.execute(text("SELECT ttu_core.heartbeat_modulation()"))
-        conn.commit()
+        # Si vous avez créé la fonction heartbeat_modulation() dans le schéma public,
+        # remplacez la ligne ci-dessous par :
+        # conn.execute(text("SELECT heartbeat_modulation()"))
+        # conn.commit()
+        pass
     st.cache_data.clear()
     st.success("✅ Battement de cœur exécuté – membrane adaptative recalculée.")
     time.sleep(1)
