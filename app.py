@@ -148,33 +148,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# Initialisation de la session state
-# -------------------------------------------------------------------
-if 'ttu_engine' not in st.session_state:
-    st.session_state.ttu_engine = TTUEngine()
-if 'event_history' not in st.session_state:
-    st.session_state.event_history = deque(maxlen=100)
-if 'threat_library' not in st.session_state:
-    st.session_state.threat_library = []
-if 'attack_events' not in st.session_state:
-    # Données simulées pour la carte
-    st.session_state.attack_events = [
-        {'lat': random.uniform(-40, 60), 'lon': random.uniform(-100, 120), 'mag': random.random()} 
-        for _ in range(15)
-    ]
-if 'org_id' not in st.session_state:
-    st.session_state.org_id = None  # Sera défini après authentification
-if 'endpoint_id' not in st.session_state:
-    st.session_state.endpoint_id = None
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None  # À remplacer par l'ID de l'utilisateur connecté
-
-# File d'attente pour le thread de monitoring (thread-safe)
-if 'monitor_queue' not in st.session_state:
-    st.session_state.monitor_queue = Queue()
-
-# -------------------------------------------------------------------
-# Moteur TTU complet
+# Moteur TTU complet (défini AVANT toute initialisation de session_state)
 # -------------------------------------------------------------------
 class TTUEngine:
     def __init__(self, k_factor=1.2, weights=(1.0, 1.5, 2.0),
@@ -259,6 +233,32 @@ class TTUEngine:
             self.baseline_scores.append(corrected)
 
         return event
+
+# -------------------------------------------------------------------
+# Initialisation de la session state
+# -------------------------------------------------------------------
+if 'ttu_engine' not in st.session_state:
+    st.session_state.ttu_engine = TTUEngine()
+if 'event_history' not in st.session_state:
+    st.session_state.event_history = deque(maxlen=100)
+if 'threat_library' not in st.session_state:
+    st.session_state.threat_library = []
+if 'attack_events' not in st.session_state:
+    # Données simulées pour la carte
+    st.session_state.attack_events = [
+        {'lat': random.uniform(-40, 60), 'lon': random.uniform(-100, 120), 'mag': random.random()} 
+        for _ in range(15)
+    ]
+if 'org_id' not in st.session_state:
+    st.session_state.org_id = None  # Sera défini après authentification
+if 'endpoint_id' not in st.session_state:
+    st.session_state.endpoint_id = None
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None  # À remplacer par l'ID de l'utilisateur connecté
+
+# File d'attente pour le thread de monitoring (thread-safe)
+if 'monitor_queue' not in st.session_state:
+    st.session_state.monitor_queue = Queue()
 
 # -------------------------------------------------------------------
 # Fonctions de collecte système (via psutil)
